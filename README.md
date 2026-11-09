@@ -6,10 +6,12 @@ digitalplat域名自动续费;dnshe域名自动续费;digitalplat API;dnshe API;
 
 - 获取域名列表
 ```bash
+# bash
 curl https://domain-api.digitalplat.org/api/v1/domains \
   -H "Authorization: Bearer dp_live_xxxxxxxxxxxxxxxxx"
 ```
 ```python
+# python
 import requests
 
 response = requests.get(
@@ -22,6 +24,7 @@ result = response.json()
 print(result["data"])
 ```
 ```js
+//javascript
 const response = await fetch("https://domain-api.digitalplat.org/api/v1/domains", {
   headers: {
     Authorization: "Bearer dp_live_xxxxxxxxxxxxxxxxx"
@@ -35,6 +38,7 @@ console.log(result.data);
 - 续费已注册域名
 
 ```bash
+#bash
 curl https://domain-api.digitalplat.org/api/v1/domains/example.us.kg/renew \
   -X POST \
   -H "Authorization: Bearer dp_live_xxxxxxxxxxxxxxxxx" \
@@ -42,6 +46,7 @@ curl https://domain-api.digitalplat.org/api/v1/domains/example.us.kg/renew \
   -d '{ "years": 1, "payment_method": "sandbox" }'
 ```
 ```python
+#python
 import requests
 
 response = requests.request(
@@ -55,6 +60,7 @@ response = requests.request(
 print(response.json())
 ```
 ```js
+//javascript
 const response = await fetch("https://domain-api.digitalplat.org/api/v1/domains/example.us.kg/renew", {
   method: "POST",
   headers: {
