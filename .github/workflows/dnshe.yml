@@ -1,0 +1,87 @@
+name: KATA_Browser
+on:
+  schedule:
+    - cron: 3 3 11 11 *
+  workflow_dispatch: null
+jobs:
+  keepalive:
+    name: Run Jobs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    concurrency:
+      group: browser-login
+      cancel-in-progress: false
+    steps:
+      - name: checkout Repository
+        uses: actions/checkout@v4
+      - name: Setting Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Selenium
+        run: >
+          sudo apt-get update && sudo apt-get install -y xvfb
+
+          pip install seleniumbase>=4.25.0 pyvirtualdisplay>=3.0
+          requests>=2.31.0
+      - name: Configure proxy
+        env:
+          HY2_URL: ${{ vars.HY2_URL }}
+        run: |
+          # exit 0
+          if [ -z "$HY2_URL" ]; then
+            echo "HY2_URL 未设置，跳过代理配置，使用直连模式"
+            echo "PROXY_SERVER=" >> $GITHUB_ENV
+            exit 0
+          fi
+          chmod +x hysteria
+
+          URL="${HY2_URL#hysteria2://}"
+          PASSWORD="${URL%%@*}"
+          SERVER="${URL#*@}"; SERVER="${SERVER%%\?*}"
+          SNI=$(echo "$URL" | grep -oP 'sni=\K[^&]+' || echo "${SERVER%%:*}")
+
+          cat > hy2.yaml << EOF
+          server: ${SERVER}
+          auth: ${PASSWORD}
+          tls:
+            sni: ${SNI}
+            insecure: true
+          http:
+            listen: 127.0.0.1:7890
+          EOF
+
+          ./hysteria client --disable-update-check -c hy2.yaml &
+          sleep 3
+          echo "PROXY_SERVER=http://127.0.0.1:7890" >> $GITHUB_ENV
+      - name: Perform Task
+        env:
+          ACCOUNTS: ${{ vars.KATA_ACCOUNTS }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          TG_API: ${{ vars.TG_API }}
+        run: python kata.py
+      - name: update Cron datetime
+        id: checkrenew
+        run: |
+          expire_d=$(date -u -d "$(cat upload/kata_renew.txt) -1 day"  +%s)
+          current_d=$(date -u +%s)
+          cron_d=$(date -u -d "$(cat upload/kata_renew.txt) -1 day"  +"%-d %-m")
+          if ((expire_d<current_d));then echo '* *' ;fi
+          CRON="3 10 $cron_d *"
+          echo "cron=$CRON" >>$GITHUB_OUTPUT
+      - name: Update cron schedule
+        uses: gr2m/set-cron-schedule-action@v2
+        with:
+          token: ${{ secrets.WORKFLOW }}
+          cron: ${{ steps.checkrenew.outputs.cron }}
+          message: "ci: update cron from recent → ${{ steps.checkrenew.outputs.cron }}"
+      - name: Clean Jobs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          delete_workflow_pattern: ${{ github.workflow }}
+          retain_days: 0
+          keep_minimum_runs: 3
