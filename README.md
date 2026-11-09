@@ -3,7 +3,11 @@ digitalplat域名自动续费;dnshe域名自动续费;digitalplat API;dnshe API;
 
 ## digitalplat API
 > https://dashboard.digitalplat.org/dashboard/api/docs
-
+>
+> 永久
+>
+> 120天续费
+> 
 - 获取域名列表
 ```bash
 # bash
