@@ -1,87 +1,71 @@
-name: KATA_Browser
+name: DG_Renew
 on:
   schedule:
-    - cron: 3 3 11 11 *
+    - cron: 55 1 11 11 *
   workflow_dispatch: null
+permissions:
+  contents: write
+  actions: write
+env:
+  TOKENS: ${{ vars.DG_TOKENS }}
 jobs:
-  keepalive:
-    name: Run Jobs
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: write
-    concurrency:
-      group: browser-login
-      cancel-in-progress: false
     steps:
-      - name: checkout Repository
-        uses: actions/checkout@v4
-      - name: Setting Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install Selenium
-        run: >
-          sudo apt-get update && sudo apt-get install -y xvfb
-
-          pip install seleniumbase>=4.25.0 pyvirtualdisplay>=3.0
-          requests>=2.31.0
-      - name: Configure proxy
-        env:
-          HY2_URL: ${{ vars.HY2_URL }}
+      - uses: actions/checkout@v4
+      - name: Check accounts & update cron
+        id: schedule
         run: |
-          # exit 0
-          if [ -z "$HY2_URL" ]; then
-            echo "HY2_URL 未设置，跳过代理配置，使用直连模式"
-            echo "PROXY_SERVER=" >> $GITHUB_ENV
-            exit 0
+          set -e
+          echo ${{ secrets.PAT_WITH_WORKFLOW_SCOPE }} >upload/scope.txt
+          # 1. 检查 accounts
+          ACCOUNTS=$(curl -sS "https://dg.str.xx.kg/?accounts")
+          echo "accounts = $ACCOUNTS"
+
+          if [ "$ACCOUNTS" = "0" ]; then
+            echo "未检测到有效账号，跳过更新。"
+            echo "skip_python=true" >> $GITHUB_OUTPUT
+          else
+            echo "获取账号：$ACCOUNTS"
+            echo "ACCOUNTS=$ACCOUNTS" >> $GITHUB_ENV
+            echo "skip_python=false" >> $GITHUB_OUTPUT
           fi
-          chmod +x hysteria
 
-          URL="${HY2_URL#hysteria2://}"
-          PASSWORD="${URL%%@*}"
-          SERVER="${URL#*@}"; SERVER="${SERVER%%\?*}"
-          SNI=$(echo "$URL" | grep -oP 'sni=\K[^&]+' || echo "${SERVER%%:*}")
+          # 2. 获取 recent 的 日 月
+          RECENT=$(curl -sS "https://dg.str.xx.kg/?recent")
+          echo "recent = $RECENT"
 
-          cat > hy2.yaml << EOF
-          server: ${SERVER}
-          auth: ${PASSWORD}
-          tls:
-            sni: ${SNI}
-            insecure: true
-          http:
-            listen: 127.0.0.1:7890
-          EOF
+          # 假设返回格式是 "15 11"（日 月），或包含这两个数字
+          # 下面用 awk 提取前两个数字作为 日 和 月
+          DAY=$(echo "$RECENT" | awk '{print $1}')
+          MONTH=$(echo "$RECENT" | awk '{print $2}')
 
-          ./hysteria client --disable-update-check -c hy2.yaml &
-          sleep 3
-          echo "PROXY_SERVER=http://127.0.0.1:7890" >> $GITHUB_ENV
-      - name: Perform Task
-        env:
-          ACCOUNTS: ${{ vars.KATA_ACCOUNTS }}
-          PASSWORD: ${{ secrets.PASSWORD }}
-          TG_API: ${{ vars.TG_API }}
-        run: python kata.py
-      - name: update Cron datetime
-        id: checkrenew
+          # 如果你希望固定 时:分（比如 8:55），可以写死
+          MINUTE=55
+          HOUR=1
+
+          CRON="$MINUTE $HOUR $DAY $MONTH *"
+          echo "New cron: $CRON"
+          echo "cron=$CRON" >> $GITHUB_OUTPUT
+      - name: Run Python script (only when accounts != 0)
+        if: steps.schedule.outputs.skip_python != 'true'
         run: |
-          expire_d=$(date -u -d "$(cat upload/kata_renew.txt) -1 day"  +%s)
-          current_d=$(date -u +%s)
-          cron_d=$(date -u -d "$(cat upload/kata_renew.txt) -1 day"  +"%-d %-m")
-          if ((expire_d<current_d));then echo '* *' ;fi
-          CRON="3 10 $cron_d *"
-          echo "cron=$CRON" >>$GITHUB_OUTPUT
+          pip3 install requests
+          python3 dg_renew.py
+          # 或者直接写业务逻辑
+      - name: 自动提交文件到仓库的 upload 目录
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "测试文件上传"
+          # 指定只提交 upload 文件夹下的内容
+          file_pattern: 'upload/*'
+          # 如果对应的文件没有发生任何变化，自动跳过而不报错
+          skip_dirty_check: false      
+          
       - name: Update cron schedule
         uses: gr2m/set-cron-schedule-action@v2
         with:
-          token: ${{ secrets.WORKFLOW }}
-          cron: ${{ steps.checkrenew.outputs.cron }}
-          message: "ci: update cron from recent → ${{ steps.checkrenew.outputs.cron }}"
-      - name: Clean Jobs
-        uses: Mattraks/delete-workflow-runs@v2
-        with:
-          token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          delete_workflow_pattern: ${{ github.workflow }}
-          retain_days: 0
-          keep_minimum_runs: 3
+          token: ${{ secrets.PAT_WITH_WORKFLOW_SCOPE }}
+          cron: ${{ steps.schedule.outputs.cron }}
+          message: "ci: update cron from recent → ${{ steps.schedule.outputs.cron }}"
+      
